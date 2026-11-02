@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Simulateur Robotique 3D - Advanced PBR & Workspace</title>
+  
+  <!-- Fonts Google : Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  
+  <link rel="stylesheet" href="style.css">
+
+  <!-- CDNs : Three.js, OrbitControls et TransformControls -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/TransformControls.js"></script>
+</head>
+<body>
+
+  <div id="canvas-container"></div>
+
+  <!-- En-tête / Header HUD -->
+  <header class="app-header">
+    <div class="header-title">
+      <div class="logo-icon">🤖</div>
+      <div>
+        <h1>RoboControl 3D</h1>
+        <span class="sub-title">Studio de Simulation & Cinématique</span>
+      </div>
+    </div>
+
+    <div class="header-center">
+      <div id="safety-alert" class="alert alert-success">
+        <span class="status-dot"></span> <span id="safety-alert-text">Système nominal : Aucune anomalie</span>
+      </div>
+    </div>
+
+    <div class="header-actions">
+      <div class="speed-control">
+        <label>Vitesse :</label>
+        <button class="btn-speed" data-speed="0.5">0.5x</button>
+        <button class="btn-speed active" data-speed="1.0">1x</button>
+        <button class="btn-speed" data-speed="2.0">2x</button>
+      </div>
+      <button class="btn btn-danger btn-estop" id="btn-estop">⚡ E-STOP</button>
+    </div>
+  </header>
+
+  <!-- Panneau Gauche : Contrôles du Robot -->
+  <aside class="ui-panel panel-left" id="controls-panel">
+    
+    <!-- Section Configuration -->
+    <div class="panel-section">
+      <div class="section-title">
+        <span>⚙️ Configuration Robot</span>
+      </div>
+      <div class="control-group">
+        <label for="dof-select">Degrés de Liberté (DOF)</label>
+        <div class="select-wrapper">
+          <select id="dof-select">
+            <option value="3">3-DOF — Bras Simplifié</option>
+            <option value="6">6-DOF — Bras Articulé Industriel</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- Section Articulations (Sliders) -->
+    <div class="panel-section">
+      <div class="section-title">
+        <span>🔄 Articulations & Moteurs</span>
+      </div>
+      <div id="sliders-container">
+        <!-- Généré dynamiquement en JS -->
+      </div>
+
+      <div class="control-group slider-card">
+        <div class="slider-header">
+          <label for="gripper-slider">Pince / Gripper</label>
+          <span id="gripper-val" class="val-badge">100%</span>
+        </div>
+        <div class="slider-container">
+          <input type="range" id="gripper-slider" min="0" max="100" value="100">
+        </div>
+      </div>
+    </div>
+
+    <!-- Section Automatisation -->
+    <div class="panel-section">
+      <div class="section-title">
+        <span>🚀 Actions & Routines</span>
+      </div>
+      <div class="btn-grid">
+        <button class="btn btn-purple" id="btn-workspace">🌌 Nuage Espace</button>
+        <button class="btn btn-primary" id="btn-pickplace">▶ Pick & Place</button>
+      </div>
+    </div>
+
+  </aside>
+
+  <!-- Panneau Droit : Trajectoires & Télémétrie -->
+  <aside class="ui-panel panel-right">
+    
+    <!-- Télémétrie & Position -->
+    <div class="panel-section" id="status-panel">
+      <div class="section-title">
+        <span>📊 Télémétrie Temps Réel</span>
+      </div>
+      <div class="telemetry-grid">
+        <div class="telemetry-card">
+          <span class="telemetry-label">Position X</span>
+          <strong id="pos-x" class="telemetry-value">0.00 <small>cm</small></strong>
+        </div>
+        <div class="telemetry-card">
+          <span class="telemetry-label">Position Y</span>
+          <strong id="pos-y" class="telemetry-value">0.00 <small>cm</small></strong>
+        </div>
+        <div class="telemetry-card">
+          <span class="telemetry-label">Position Z</span>
+          <strong id="pos-z" class="telemetry-value">0.00 <small>cm</small></strong>
+        </div>
+        <div class="telemetry-card">
+          <span class="telemetry-label">Portée Max</span>
+          <strong id="reach-val" class="telemetry-value">0 %</strong>
+        </div>
+      </div>
+    </div>
+
+    <!-- Éditeur de Waypoints -->
+    <div class="panel-section" id="waypoints-panel">
+      <div class="section-title">
+        <span>📍 Éditeur de Trajectoires</span>
+      </div>
+
+      <div class="waypoint-list" id="waypoint-list">
+        <div class="empty-state">
+          <span>Aucun point d'étape enregistré</span>
+        </div>
+      </div>
+
+      <div class="btn-grid">
+        <button class="btn btn-secondary" id="btn-add-wp">+ Ajouter Point</button>
+        <button class="btn btn-outline-danger" id="btn-clear-wp">Effacer</button>
+      </div>
+
+      <button class="btn btn-success btn-full" id="btn-run-wp" style="margin-top: 10px;">
+        ▶ Exécuter Séquence
+      </button>
+
+      <div class="export-section">
+        <label class="export-label">Exporter la trajectoire :</label>
+        <div class="btn-group-sm">
+          <button class="btn btn-outline" id="btn-export-json">JSON</button>
+          <button class="btn btn-outline" id="btn-export-gcode">G-Code</button>
+          <button class="btn btn-outline" id="btn-export-python">Python</button>
+        </div>
+      </div>
+    </div>
+
+  </aside>
+
+  <script src="script.js"></script>
+</body>
+</html>
