@@ -1,0 +1,26 @@
+{
+  "name": "robot-control-3d",
+  "version": "1.0.0",
+  "description": "A real-time 3D robotic arm simulator with IK solver and PBR rendering.",
+  "main": "script.js",
+  "scripts": {
+    "start": "npx serve .",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": 
+  },
+  "keywords": [
+    "threejs",
+    "webgl",
+    "robotics",
+    "inverse-kinematics",
+    "3d"
+  ],
+  "author": "HvK Okla",
+  "license": "MIT",
+  "dependencies": {
+    "three": "^0.128.0"
+  }
+}
