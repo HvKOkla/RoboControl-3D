@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Simulateur robotique 3D interactif : cinématique, pick & place, waypoints, export G-Code et Python.">
+  <title>RoboControl 3D — Simulateur Robotique</title>
+
+  <!-- Favicon inline (évite un 404) -->
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤖</text></svg>">
+
+  <!-- Fonts Google -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="style.css">
+
+  <!-- Import map : Three.js moderne en modules ES -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+
+  <noscript>
+    <div class="noscript-banner">
+      ⚠️ Ce simulateur nécessite JavaScript et WebGL pour fonctionner.
+    </div>
+  </noscript>
+
+  <!-- Loader affiché jusqu'à ce que la scène 3D soit prête -->
+  <div id="loader" class="loader" role="status" aria-live="polite">
+    <div class="loader-spinner"></div>
+    <span>Chargement de la scène 3D…</span>
+  </div>
+
+  <!-- Fallback si WebGL n'est pas supporté -->
+  <div id="webgl-error" class="webgl-error" hidden role="alert">
+    <h2>WebGL non disponible</h2>
+    <p>Votre navigateur ne supporte pas WebGL. Essayez Chrome, Firefox ou Edge récent avec l'accélération matérielle activée.</p>
+  </div>
+
+  <main id="canvas-container" aria-label="Vue 3D du robot"></main>
+
+  <!-- En-tête / Header HUD -->
+  <header class="app-header">
+    <div class="header-title">
+      <div class="logo-icon" aria-hidden="true">🤖</div>
+      <div>
+        <h1>RoboControl 3D</h1>
+        <span class="sub-title">Studio de Simulation &amp; Cinématique</span>
+      </div>
+    </div>
+
+    <div class="header-center">
+      <div id="safety-alert" class="alert alert-success" role="status" aria-live="polite">
+        <span class="status-dot" aria-hidden="true"></span>
+        <span id="safety-alert-text">Système nominal : Aucune anomalie</span>
+      </div>
+    </div>
+
+    <div class="header-actions">
+      <fieldset class="speed-control">
+        <legend>Vitesse</legend>
+        <button type="button" class="btn-speed" data-speed="0.5" aria-pressed="false">0.5x</button>
+        <button type="button" class="btn-speed active" data-speed="1.0" aria-pressed="true">1x</button>
+        <button type="button" class="btn-speed" data-speed="2.0" aria-pressed="false">2x</button>
+      </fieldset>
+      <button type="button" class="btn btn-danger btn-estop" id="btn-estop" aria-label="Arrêt d'urgence">⚡ E-STOP</button>
+    </div>
+  </header>
+
+  <!-- Panneau Gauche : Contrôles du Robot -->
+  <aside class="ui-panel panel-left" id="controls-panel" aria-label="Contrôles du robot">
+
+    <!-- Section Configuration -->
+    <div class="panel-section">
+      <div class="section-title">
+        <span aria-hidden="true">⚙️</span> Configuration Robot
+      </div>
+      <div class="control-group">
+        <label for="dof-select">Degrés de Liberté (DOF)</label>
+        <div class="select-wrapper">
+          <select id="dof-select">
+            <option value="3">3-DOF — Bras Simplifié</option>
+            <option value="6" selected>6-DOF — Bras Articulé Industriel</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- Section Articulations (Sliders) -->
+    <div class="panel-section">
+      <div class="section-title">
+        <span aria-hidden="true">🔄</span> Articulations &amp; Moteurs
+      </div>
+      <div id="sliders-container">
+        <!-- Généré dynamiquement en JS -->
+      </div>
+
+      <div class="control-group slider-card">
+        <div class="slider-header">
+          <label for="gripper-slider">Pince / Gripper</label>
+          <span id="gripper-val" class="val-badge" aria-live="polite">100%</span>
+        </div>
+        <div class="slider-container">
+          <input type="range" id="gripper-slider" min="0" max="100" value="100">
+        </div>
+      </div>
+    </div>
+
+    <!-- Section Automatisation -->
+    <div class="panel-section">
+      <div class="section-title">
+        <span aria-hidden="true">🚀</span> Actions &amp; Routines
+      </div>
+      <div class="btn-grid">
+        <button type="button" class="btn btn-purple" id="btn-workspace">🌌 Nuage Espace</button>
+        <button type="button" class="btn btn-primary" id="btn-pickplace">▶ Pick &amp; Place</button>
+      </div>
+    </div>
+
+  </aside>
+
+  <!-- Panneau Droit : Trajectoires & Télémétrie -->
+  <aside class="ui-panel panel-right" aria-label="Trajectoires et télémétrie">
+
+    <!-- Télémétrie & Position -->
+    <div class="panel-section" id="status-panel">
+      <div class="section-title">
+        <span aria-hidden="true">📊</span> Télémétrie Temps Réel
+      </div>
+      <div class="telemetry-grid">
+        <div class="telemetry-card">
+          <span class="telemetry-label">Position X</span>
+          <strong id="pos-x" class="telemetry-value">0.00 <small>cm</small></strong>
+        </div>
+        <div class="telemetry-card">
+          <span class="telemetry-label">Position Y</span>
+          <strong id="pos-y" class="telemetry-value">0.00 <small>cm</small></strong>
+        </div>
+        <div class="telemetry-card">
+          <span class="telemetry-label">Position Z</span>
+          <strong id="pos-z" class="telemetry-value">0.00 <small>cm</small></strong>
+        </div>
+        <div class="telemetry-card">
+          <span class="telemetry-label">Portée Max</span>
+          <strong id="reach-val" class="telemetry-value">0 %</strong>
+        </div>
+      </div>
+    </div>
+
+    <!-- Éditeur de Waypoints -->
+    <div class="panel-section" id="waypoints-panel">
+      <div class="section-title">
+        <span aria-hidden="true">📍</span> Éditeur de Trajectoires
+      </div>
+
+      <div class="waypoint-list" id="waypoint-list" aria-live="polite">
+        <div class="empty-state">
+          <span>Aucun point d'étape enregistré</span>
+        </div>
+      </div>
+
+      <div class="btn-grid">
+        <button type="button" class="btn btn-secondary" id="btn-add-wp">+ Ajouter Point</button>
+        <button type="button" class="btn btn-outline-danger" id="btn-clear-wp">Effacer</button>
+      </div>
+
+      <button type="button" class="btn btn-success btn-full btn-run-sequence" id="btn-run-wp">
+        ▶ Exécuter Séquence
+      </button>
+
+      <fieldset class="export-section">
+        <legend class="export-label">Exporter la trajectoire</legend>
+        <div class="btn-group-sm">
+          <button type="button" class="btn btn-outline" id="btn-export-json">JSON</button>
+          <button type="button" class="btn btn-outline" id="btn-export-gcode">G-Code</button>
+          <button type="button" class="btn btn-outline" id="btn-export-python">Python</button>
+        </div>
+      </fieldset>
+    </div>
+
+  </aside>
+
+  <!-- Script principal en module ES -->
+  <script type="module" src="script.js"></script>
+
+  
+  <script>
+    window.addEventListener('error', (e) => {
+      if (e.message && e.message.includes('module')) {
+        const loader = document.getElementById('loader');
+        if (loader) loader.innerHTML = '<span>❌ Impossible de charger Three.js. Vérifiez votre connexion.</span>';
+      }
+    }, true);
+  </script>
+
+</body>
+</html>
