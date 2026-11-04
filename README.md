@@ -9,7 +9,11 @@
 To prove the mathematical accuracy of the WebGL simulator, the Forward Kinematics (DH parameters) logic has been ported and validated in two additional languages:
 
 *   **Python (`python_examples/`)** : A script using `numpy` that replicates the exact joint transformations. Perfect for academic research and ROS prototyping.
-    *   Run it with: `python python_examples/ik_solver.py`
+	### Python 3D Trajectory Visualization
+By running `python_examples/ik_solver.py`, the script calculates the Forward Kinematics and plots the trajectory using Matplotlib.
+
+![Trajectory Plot](python_examples/trajectory_plot.png)
+
 *   **C++ (`cpp_examples/`)** : A high-performance version using raw matrix multiplication and CMake, demonstrating how the algorithm would run on an industrial robot controller.
     *   Build it with: `cmake` and `make` (or standard `g++`).
 *   **Octave/MATLAB (`octave_examples/`)** : A `.m` script for academic validation. 
