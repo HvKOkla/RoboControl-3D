@@ -834,6 +834,28 @@ if __name__ == "__main__":
     this.downloadFile(dataStr, 'robot_trajectory.py');
   }
 
+  exportURDF(dhParams, jointLimits) {
+    const links = dhParams.map((_, i) => `<link name="link_${i + 1}"/>`).join('\n  ');
+    const joints = dhParams.map((dh, i) => {
+      const limit = jointLimits[i];
+      return `  <joint name="joint_${i + 1}" type="revolute">\n` +
+        `    <parent link="${i === 0 ? 'base_link' : `link_${i}_dh`}"/>\n` +
+        `    <child link="link_${i + 1}"/>\n` +
+        `    <origin xyz="0 0 ${(dh.d / 100).toFixed(6)}" rpy="0 0 ${dh.thetaOffset.toFixed(6)}"/>\n` +
+        `    <axis xyz="0 0 1"/>\n` +
+        `    <limit lower="${(limit.min * Math.PI / 180).toFixed(6)}" upper="${(limit.max * Math.PI / 180).toFixed(6)}" effort="1" velocity="2"/>\n` +
+        `  </joint>\n` +
+        `  <joint name="link_transform_${i + 1}" type="fixed">\n` +
+        `    <parent link="link_${i + 1}"/><child link="link_${i + 1}_dh"/>\n` +
+        `    <origin xyz="${(dh.a / 100).toFixed(6)} 0 0" rpy="${dh.alpha.toFixed(6)} 0 0"/>\n` +
+        `  </joint>`;
+    }).join('\n');
+    const dhLinks = dhParams.map((_, i) => `<link name="link_${i + 1}_dh"/>`).join('\n  ');
+    const urdf = `<?xml version="1.0"?>\n<robot name="robocontrol_arm">\n` +
+      `  <link name="base_link"/>\n  ${links}\n  ${dhLinks}\n${joints}\n</robot>\n`;
+    this.downloadFile('data:application/xml;charset=utf-8,' + encodeURIComponent(urdf), 'robot.urdf');
+  }
+
   downloadFile(dataStr, filename) {
     const a = document.createElement('a');
     a.setAttribute('href', dataStr);
@@ -1021,6 +1043,9 @@ class RobotApp {
     document.getElementById('btn-export-gcode')?.addEventListener('click', () => this.waypointMgr.exportGCode());
     document.getElementById('btn-export-python')?.addEventListener('click', () => {
       this.waypointMgr.exportPython(this.activeConfig.limits);
+    });
+    document.getElementById('btn-export-urdf')?.addEventListener('click', () => {
+      this.waypointMgr.exportURDF(this.activeConfig.dhParams, this.activeConfig.limits);
     });
   }
 
