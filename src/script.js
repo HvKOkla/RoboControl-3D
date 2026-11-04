@@ -1,11 +1,11 @@
-
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
+
 const SAFETY = Object.freeze({
   MIN_GROUND_Z: 0.5,
-  MAX_JOINT_VELOCITY_DEG_PER_SEC: 120,   
-  MAX_REACH_MARGIN: 1.05,                 
+  MAX_JOINT_VELOCITY_DEG_PER_SEC: 120,
+  MAX_REACH_MARGIN: 1.05,
   IK_MAX_ITER: 30,
   IK_TOLERANCE: 0.1,
   IK_DAMPING: 0.5,
@@ -15,11 +15,14 @@ const SAFETY = Object.freeze({
   MAX_SPEED_FACTOR: 3.0,
   MIN_SPEED_FACTOR: 0.1,
   ANIMATION_TIMEOUT_MS: 10000,
+  SCENE_UNIT_TO_MM: 10,
+  LOCALSTORAGE_KEY: 'robocontrol_waypoints_v1',
 });
 
 
 const SafeLogger = {
   log(level, message, data) {
+    if (typeof console === 'undefined') return;
     const ts = new Date().toISOString();
     const prefix = `[${ts}] [${level}]`;
     if (data !== undefined) console[level === 'error' ? 'error' : level === 'warn' ? 'warn' : 'log'](prefix, message, data);
@@ -63,12 +66,10 @@ class UltraSafeValidator {
     SafeLogger.info('E-STOP réinitialisé');
   }
 
-  
   _isFiniteVec3(v) {
     return v && Number.isFinite(v.x) && Number.isFinite(v.y) && Number.isFinite(v.z);
   }
 
- 
   _reject(status, message) {
     const now = performance.now();
     if (message === this._lastRejectedMessage && now - this._lastRejectedTime < 250) {
@@ -76,6 +77,7 @@ class UltraSafeValidator {
     }
     this._lastRejectedMessage = message;
     this._lastRejectedTime = now;
+    if (status === 'danger') SafeLogger.warn(`[Validator] ${message}`);
     return { safe: false, status, message };
   }
 
@@ -84,7 +86,6 @@ class UltraSafeValidator {
       return this._reject('danger', "🚨 ARRÊT D'URGENCE ACTIF !");
     }
 
-    
     if (!Array.isArray(jointAnglesDeg) || jointAnglesDeg.length === 0) {
       return this._reject('danger', 'Erreur : tableau d\'angles invalide.');
     }
@@ -94,12 +95,10 @@ class UltraSafeValidator {
       }
     }
 
-    
     if (!this._isFiniteVec3(endEffectorPos)) {
       return this._reject('danger', 'Erreur : position effecteur invalide.');
     }
 
-   
     const TOLERANCE_DEG = 0.5;
     for (let i = 0; i < jointAnglesDeg.length; i++) {
       const limit = this.jointLimits[i];
@@ -112,7 +111,6 @@ class UltraSafeValidator {
       }
     }
 
-    
     if (endEffectorPos.z < this.minGroundZ) {
       return this._reject(
         'danger',
@@ -120,13 +118,11 @@ class UltraSafeValidator {
       );
     }
 
-    
     const SAFETY_MARGIN = 0.5;
     for (const obs of obstacles) {
       if (obs && obs.box && obs.box.containsPoint(endEffectorPos)) {
         return this._reject('danger', 'Collision détectée avec un obstacle !');
       }
-      
       if (obs && obs.box) {
         const closest = obs.box.clampPoint(endEffectorPos, new THREE.Vector3());
         if (closest.distanceTo(endEffectorPos) < SAFETY_MARGIN) {
@@ -135,7 +131,6 @@ class UltraSafeValidator {
       }
     }
 
-    
     const dist = Math.sqrt(
       endEffectorPos.x ** 2 + endEffectorPos.y ** 2 + endEffectorPos.z ** 2
     );
@@ -156,7 +151,6 @@ class UltraSafeValidator {
     return Math.max(limit.min, Math.min(limit.max, angleDeg));
   }
 
-  
   isVelocitySafe(fromAngles, toAngles, durationMs) {
     if (!durationMs || durationMs <= 0) return false;
     if (fromAngles.length !== toAngles.length) return false;
@@ -183,12 +177,12 @@ class DHLink {
     this.thetaOffset = thetaOffset;
   }
 
-  getMatrix(thetaRad) {
+  getMatrix(thetaRad, target) {
     const totalTheta = thetaRad + this.thetaOffset;
     const ct = Math.cos(totalTheta), st = Math.sin(totalTheta);
     const ca = Math.cos(this.alpha), sa = Math.sin(this.alpha);
 
-    const m = new THREE.Matrix4();
+    const m = target || new THREE.Matrix4();
     m.set(
       ct, -st * ca,  st * sa, this.a * ct,
       st,  ct * ca, -ct * sa, this.a * st,
@@ -201,6 +195,11 @@ class DHLink {
 
 class KinematicChain {
   constructor(dhParams) {
+    // ── FIX #15 : pool de matrices réutilisables (perf) ──
+    this._tmpMatrix = new THREE.Matrix4();
+    this._tmpVec = new THREE.Vector3();
+    this._tmpQuat = new THREE.Quaternion();
+    this._tmpScale = new THREE.Vector3();
     this.setParams(dhParams);
   }
 
@@ -212,38 +211,42 @@ class KinematicChain {
   }
 
   forwardKinematics(jointAnglesDeg) {
-    let currentMatrix = new THREE.Matrix4().identity();
+    let currentMatrix = this._tmpMatrix.identity();
     const transforms = [currentMatrix.clone()];
 
     for (let i = 0; i < this.links.length; i++) {
       const deg = Number(jointAnglesDeg[i]);
       if (!Number.isFinite(deg)) {
         SafeLogger.error(`Angle joint ${i + 1} invalide : ${jointAnglesDeg[i]}`);
-        // ── SÉCURITÉ : on bloque plutôt que de produire une pose NaN ──
         return { endEffectorPos: new THREE.Vector3(0, 0, 0), transforms, invalid: true };
       }
       const rad = (deg * Math.PI) / 180;
-      const linkMatrix = this.links[i].getMatrix(rad);
+      const linkMatrix = this.links[i].getMatrix(rad, new THREE.Matrix4());
       currentMatrix.multiply(linkMatrix);
       transforms.push(currentMatrix.clone());
     }
 
     const pos = new THREE.Vector3();
-    const quat = new THREE.Quaternion();
-    const scale = new THREE.Vector3();
+    const quat = this._tmpQuat;
+    const scale = this._tmpScale;
     currentMatrix.decompose(pos, quat, scale);
 
     return { endEffectorPos: pos, transforms };
   }
 
-  // ── SÉCURITÉ : IK borné en itérations, validation NaN, arrêt E-STOP ──
-  solveIK(targetPos, currentAnglesDeg, maxIter = SAFETY.IK_MAX_ITER, damping = SAFETY.IK_DAMPING) {
+  // ── FIX #4 : IK bornée + clamp articulaire + validation NaN ──
+  solveIK(targetPos, currentAnglesDeg, limits, maxIter = SAFETY.IK_MAX_ITER, damping = SAFETY.IK_DAMPING) {
     if (!targetPos || !Number.isFinite(targetPos.x)) {
       SafeLogger.warn('IK : cible invalide');
       return [...currentAnglesDeg];
     }
 
-    let angles = [...currentAnglesDeg];
+    const clamp = (v, i) => {
+      if (!limits || !limits[i]) return v;
+      return Math.max(limits[i].min, Math.min(limits[i].max, v));
+    };
+
+    let angles = currentAnglesDeg.map((a, i) => clamp(a, i));
     const deltaDeg = 0.1;
 
     for (let iter = 0; iter < maxIter; iter++) {
@@ -267,10 +270,11 @@ class KinematicChain {
 
       for (let j = 0; j < angles.length; j++) {
         const dot = J[j].dot(error);
-        if (Number.isFinite(dot)) angles[j] += dot * damping;
+        if (Number.isFinite(dot)) {
+          angles[j] = clamp(angles[j] + dot * damping, j);
+        }
       }
 
-      
       if (angles.some(a => !Number.isFinite(a))) {
         SafeLogger.warn('IK divergente — retour aux angles initiaux');
         return [...currentAnglesDeg];
@@ -293,7 +297,11 @@ class Robot3DView {
     this.obstacles = [];
     this.importedModels = [];
     this._resizeHandler = null;
+    this._resizeObserver = null;
     this._rafId = null;
+    this._paused = false;
+    // ── FIX #3 : flag anti-boucle TransformControls ──
+    this._updatingGizmoProgrammatically = false;
     this.initScene();
   }
 
@@ -374,14 +382,12 @@ class Robot3DView {
 
     this.initEnvironmentObjects();
 
-    // Cible IK
     this.targetMesh = new THREE.Mesh(
       new THREE.SphereGeometry(2, 16, 16),
       new THREE.MeshBasicMaterial({ color: 0x10b981, wireframe: true })
     );
     this.scene.add(this.targetMesh);
 
-    // TransformControls — API r160 : getHelper() requis
     this.transformControls = new TransformControls(this.camera, this.renderer.domElement);
     this.transformControls.attach(this.targetMesh);
     this.transformControls.setSize(0.75);
@@ -391,24 +397,32 @@ class Robot3DView {
       this.orbit.enabled = !event.value;
     });
 
+    // ── FIX #3 : ignore les updates programmatiques ──
     this.transformControls.addEventListener('change', () => {
-      if (this.transformControls.dragging) {
-        this.onTargetMove(this.targetMesh.position);
-      }
+      if (!this.transformControls.dragging) return;
+      if (this._updatingGizmoProgrammatically) return;
+      this.onTargetMove(this.targetMesh.position);
     });
 
     this.robotGroup = new THREE.Group();
     this.scene.add(this.robotGroup);
 
-    // ── SÉCURITÉ : resize géré ici, cleanup possible ──
+    // ── FIX #18 : ResizeObserver + fallback window ──
     this._resizeHandler = () => {
       if (!this.camera || !this.renderer) return;
-      this.camera.aspect = window.innerWidth / window.innerHeight;
+      const w = this.container.clientWidth || window.innerWidth;
+      const h = this.container.clientHeight || window.innerHeight;
+      this.camera.aspect = w / h;
       this.camera.updateProjectionMatrix();
       this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-      this.renderer.setSize(window.innerWidth, window.innerHeight);
+      this.renderer.setSize(w, h);
     };
     window.addEventListener('resize', this._resizeHandler);
+
+    if (typeof ResizeObserver !== 'undefined') {
+      this._resizeObserver = new ResizeObserver(this._resizeHandler);
+      this._resizeObserver.observe(this.container);
+    }
   }
 
   initEnvironmentObjects() {
@@ -448,10 +462,20 @@ class Robot3DView {
     this.scene.add(this.targetCyl);
   }
 
-  // ── SÉCURITÉ : validation URL + limite de modèles importés ──
+  // ── FIX #11 : validation URL stricte ──
   async loadGLTFModel(url, position = new THREE.Vector3(0, 0, 0), scale = new THREE.Vector3(1, 1, 1)) {
-    if (typeof url !== 'string' || !/^https?:\/\/|^\/|^\.\//.test(url)) {
-      SafeLogger.warn('loadGLTFModel : URL refusée', url);
+    if (typeof url !== 'string' || url.length === 0) {
+      SafeLogger.warn('loadGLTFModel : URL invalide');
+      return;
+    }
+    try {
+      const parsed = new URL(url, window.location.href);
+      if (!['http:', 'https:'].includes(parsed.protocol)) {
+        SafeLogger.warn('loadGLTFModel : protocole refusé', parsed.protocol);
+        return;
+      }
+    } catch {
+      SafeLogger.warn('loadGLTFModel : URL malformée', url);
       return;
     }
     if (this.importedModels.length >= SAFETY.MAX_IMPORTED_MODELS) {
@@ -586,7 +610,6 @@ class Robot3DView {
     }
   }
 
-  
   toggleWorkspaceCloud(dhParams, kinematics) {
     if (this.workspaceMesh) {
       this.scene.remove(this.workspaceMesh);
@@ -635,7 +658,12 @@ class Robot3DView {
       const lastMat = transforms[transforms.length - 1];
       const pos = new THREE.Vector3();
       lastMat.decompose(pos, new THREE.Quaternion(), new THREE.Vector3());
-      if (Number.isFinite(pos.x)) this.targetMesh.position.copy(pos);
+      if (Number.isFinite(pos.x)) {
+        // ── FIX #3 : protège contre la boucle IK ↔ gizmo ──
+        this._updatingGizmoProgrammatically = true;
+        this.targetMesh.position.copy(pos);
+        this._updatingGizmoProgrammatically = false;
+      }
     }
   }
 
@@ -646,6 +674,7 @@ class Robot3DView {
 
   dispose() {
     if (this._resizeHandler) window.removeEventListener('resize', this._resizeHandler);
+    if (this._resizeObserver) this._resizeObserver.disconnect();
     if (this.renderer) this.renderer.dispose();
   }
 }
@@ -657,9 +686,9 @@ class WaypointManager {
     this.container = containerEl;
     this.onUpdate = onUpdate;
     this.waypoints = [];
+    this.loadFromLocalStorage();
   }
 
-  
   addWaypoint(angles, pos) {
     if (this.waypoints.length >= SAFETY.MAX_WAYPOINTS) {
       SafeLogger.warn(`Limite de ${SAFETY.MAX_WAYPOINTS} waypoints atteinte`);
@@ -674,22 +703,57 @@ class WaypointManager {
       return false;
     }
     this.waypoints.push({
-      id: Date.now(),
+      id: Date.now() + Math.random(),
       angles: [...angles],
       pos: { x: pos.x, y: pos.y, z: pos.z },
     });
+    this.saveToLocalStorage();
     this.render();
     if (this.onUpdate) this.onUpdate();
     return true;
   }
 
-  clear() {
-    this.waypoints = [];
+  // ── FIX #9 : suppression individuelle ──
+  removeWaypoint(id) {
+    this.waypoints = this.waypoints.filter(w => w.id !== id);
+    this.saveToLocalStorage();
     this.render();
     if (this.onUpdate) this.onUpdate();
   }
 
-  
+  clear() {
+    this.waypoints = [];
+    this.saveToLocalStorage();
+    this.render();
+    if (this.onUpdate) this.onUpdate();
+  }
+
+  // ── FIX #10 : persistance localStorage ──
+  saveToLocalStorage() {
+    try {
+      localStorage.setItem(SAFETY.LOCALSTORAGE_KEY, JSON.stringify(this.waypoints));
+    } catch (e) {
+      SafeLogger.warn('Échec sauvegarde localStorage', e);
+    }
+  }
+
+  loadFromLocalStorage() {
+    try {
+      const raw = localStorage.getItem(SAFETY.LOCALSTORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return;
+      this.waypoints = parsed.filter(w =>
+        w && Array.isArray(w.angles) &&
+        w.angles.every(Number.isFinite) &&
+        w.pos && Number.isFinite(w.pos.x) && Number.isFinite(w.pos.y) && Number.isFinite(w.pos.z)
+      );
+    } catch (e) {
+      SafeLogger.warn('Échec chargement localStorage', e);
+      this.waypoints = [];
+    }
+  }
+
   _esc(s) {
     return String(s).replace(/[&<>"']/g, c => ({
       '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
@@ -702,11 +766,20 @@ class WaypointManager {
       return;
     }
     this.container.innerHTML = this.waypoints.map((wp, i) => `
-      <div class="waypoint-item">
+      <div class="waypoint-item" data-id="${this._esc(wp.id)}">
         <span>#${i + 1} [X:${this._esc(wp.pos.x.toFixed(0))}, Y:${this._esc(wp.pos.y.toFixed(0))}, Z:${this._esc(wp.pos.z.toFixed(0))}]</span>
         <span style="color: var(--accent);">${this._esc(wp.angles.map(a => Math.round(a) + '°').join(', '))}</span>
+        <button type="button" class="btn-wp-remove" aria-label="Supprimer le waypoint ${i + 1}">✕</button>
       </div>
     `).join('');
+
+    // ── FIX #9 : bind suppression ──
+    this.container.querySelectorAll('.btn-wp-remove').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const id = parseFloat(e.currentTarget.parentElement.dataset.id);
+        this.removeWaypoint(id);
+      });
+    });
   }
 
   exportJSON() {
@@ -715,17 +788,48 @@ class WaypointManager {
   }
 
   exportGCode() {
-    let gcode = '; G-Code Généré par Simulateur Robotique\nG21 ; Unités en mm\nG90 ; Positionnement absolu\nG28 ; Homing\n\n';
+    let gcode = '; G-Code Généré par Simulateur Robotique\n';
+    gcode += `; Unités scène: cm → mm (×${SAFETY.SCENE_UNIT_TO_MM})\n`;
+    gcode += 'G21 ; Unités en mm\nG90 ; Positionnement absolu\nG28 ; Homing\n\n';
     this.waypoints.forEach((wp, i) => {
-      gcode += `; Waypoint ${i + 1}\nG01 X${(wp.pos.x * 10).toFixed(2)} Y${(wp.pos.y * 10).toFixed(2)} Z${(wp.pos.z * 10).toFixed(2)} F1500\n`;
+      const x = wp.pos.x * SAFETY.SCENE_UNIT_TO_MM;
+      const y = wp.pos.y * SAFETY.SCENE_UNIT_TO_MM;
+      const z = wp.pos.z * SAFETY.SCENE_UNIT_TO_MM;
+      gcode += `; Waypoint ${i + 1}\nG01 X${x.toFixed(2)} Y${y.toFixed(2)} Z${z.toFixed(2)} F1500\n`;
     });
     const dataStr = 'data:text/plain;charset=utf-8,' + encodeURIComponent(gcode);
     this.downloadFile(dataStr, 'robot_trajectory.gcode');
   }
 
-  exportPython() {
-    let py = '# Script Python de Trajectoire Robotique (ROS / PyBullet)\nimport time\n\nwaypoints = ' + JSON.stringify(this.waypoints.map(w => w.angles), null, 2) + '\n\n';
-    py += 'def execute_trajectory(robot):\n    for angles in waypoints:\n        robot.set_joint_angles(angles)\n        time.sleep(0.5)\n';
+  // ── FIX #8 : export Python avec limites articulaires ──
+  exportPython(jointLimits) {
+    const limits = jointLimits || [];
+    let py = '# Script Python de Trajectoire Robotique (ROS / PyBullet)\n';
+    py += '# Généré par RoboControl 3D\n';
+    py += 'import time\n\n';
+    py += 'JOINT_LIMITS = ' + JSON.stringify(limits.map(l => [l.min, l.max]), null, 2) + '\n\n';
+    py += 'waypoints = ' + JSON.stringify(this.waypoints.map(w => w.angles), null, 2) + '\n\n';
+    py += `def safe_set_joint_angles(robot, angles):
+    """Applique les angles avec vérification des butées."""
+    if len(angles) != len(JOINT_LIMITS):
+        raise ValueError(f"Attendu {len(JOINT_LIMITS)} joints, reçu {len(angles)}")
+    for i, (a, (lo, hi)) in enumerate(zip(angles, JOINT_LIMITS)):
+        if not (lo <= a <= hi):
+            raise ValueError(f"Joint {i+1} hors limites: {a}° hors [{lo}°, {hi}°]")
+    robot.set_joint_angles(angles)
+
+
+def execute_trajectory(robot):
+    for angles in waypoints:
+        safe_set_joint_angles(robot, angles)
+        time.sleep(0.5)
+
+
+if __name__ == "__main__":
+    # robot = MyRobot()  # remplacer par votre API
+    # execute_trajectory(robot)
+    pass
+`;
     const dataStr = 'data:text/plain;charset=utf-8,' + encodeURIComponent(py);
     this.downloadFile(dataStr, 'robot_trajectory.py');
   }
@@ -745,7 +849,11 @@ class WaypointManager {
 class RobotApp {
   constructor() {
     this.speedFactor = 1.0;
-    this._animationToken = 0; 
+    this._animationToken = 0;
+    // ── FIX #1 : initialisation défensive ──
+    this.sliders = [];
+    this.valBadges = [];
+    this._paused = false;
 
     this.dofConfigs = {
       '3': {
@@ -800,12 +908,17 @@ class RobotApp {
 
     this.view = new Robot3DView(container, (targetPos) => this.onIKTargetDragged(targetPos));
     this.waypointMgr = new WaypointManager(document.getElementById('waypoint-list'));
+    this.waypointMgr.render();
 
     this.initUI();
     this.switchDOF('3');
     this.startLoop();
 
-    // Loader masqué une fois tout prêt
+    // ── FIX #19 : pause quand onglet caché ──
+    document.addEventListener('visibilitychange', () => {
+      this._paused = document.hidden;
+    });
+
     document.getElementById('loader')?.classList.add('hidden');
   }
 
@@ -814,22 +927,48 @@ class RobotApp {
       this.switchDOF(e.target.value);
     });
 
+    // ── FIX #2 : E-STOP toggle (trigger ↔ reset) ──
     document.getElementById('btn-estop')?.addEventListener('click', () => {
-      this.validator.triggerEStop();
+      if (this.validator.isEStopped) {
+        this.validator.resetEStop();
+      } else {
+        this.validator.triggerEStop();
+      }
+      this._applyEStopToSliders();
       this.updateRobot();
       this._updateEStopUI();
     });
 
-    // ── SÉCURITÉ : raccourci clavier E-STOP (Espace/Échap) ──
+    // ── FIX #22 : ne pas voler Space/Escape aux inputs ──
     window.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' || e.code === 'Space') {
+      const tag = document.activeElement?.tagName;
+      const isFormControl = tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA';
+
+      if (e.key === 'Escape') {
         e.preventDefault();
-        this.validator.triggerEStop();
-        this.updateRobot();
-        this._updateEStopUI();
+        if (!this.validator.isEStopped) {
+          this.validator.triggerEStop();
+          this._applyEStopToSliders();
+          this.updateRobot();
+          this._updateEStopUI();
+        }
+        return;
       }
-      if (e.key === 'r' || e.key === 'R') {
+
+      if (e.code === 'Space' && !isFormControl) {
+        e.preventDefault();
+        if (!this.validator.isEStopped) {
+          this.validator.triggerEStop();
+          this._applyEStopToSliders();
+          this.updateRobot();
+          this._updateEStopUI();
+        }
+        return;
+      }
+
+      if ((e.key === 'r' || e.key === 'R') && !isFormControl) {
         this.validator.resetEStop();
+        this._applyEStopToSliders();
         this._updateEStopUI();
       }
     });
@@ -880,17 +1019,28 @@ class RobotApp {
 
     document.getElementById('btn-export-json')?.addEventListener('click', () => this.waypointMgr.exportJSON());
     document.getElementById('btn-export-gcode')?.addEventListener('click', () => this.waypointMgr.exportGCode());
-    document.getElementById('btn-export-python')?.addEventListener('click', () => this.waypointMgr.exportPython());
+    document.getElementById('btn-export-python')?.addEventListener('click', () => {
+      this.waypointMgr.exportPython(this.activeConfig.limits);
+    });
+  }
+
+  _applyEStopToSliders() {
+    const stopped = this.validator.isEStopped;
+    this.sliders.forEach(s => { s.disabled = stopped; });
   }
 
   _updateEStopUI() {
     const btn = document.getElementById('btn-estop');
     if (!btn) return;
     if (this.validator.isEStopped) {
-      btn.textContent = 'E-STOP ACTIF';
-      btn.setAttribute('aria-label', "Arrêt d'urgence actif — appuyer sur R pour réinitialiser");
+      btn.textContent = '🔄 RÉARMER (R)';
+      btn.classList.remove('btn-danger');
+      btn.classList.add('btn-warning');
+      btn.setAttribute('aria-label', "Arrêt d'urgence actif — cliquer pour réarmer");
     } else {
-      btn.textContent = 'E-STOP';
+      btn.textContent = '⚡ E-STOP';
+      btn.classList.remove('btn-warning');
+      btn.classList.add('btn-danger');
       btn.setAttribute('aria-label', "Arrêt d'urgence");
     }
   }
@@ -938,16 +1088,22 @@ class RobotApp {
 
       const slider = div.querySelector('input');
       const badge = div.querySelector('.val-badge');
+      // ── FIX #20 : aria-valuetext pour lecteurs d'écran ──
+      slider.setAttribute('aria-valuetext', `0 degrés`);
+      slider.setAttribute('aria-label', name);
 
       slider.addEventListener('input', () => {
         if (this.validator.isEStopped) {
-          // ── SÉCURITÉ : bloque les sliders en E-STOP ──
           slider.value = this.validator.clampAngle(parseFloat(slider.value), i);
           return;
         }
         badge.textContent = `${slider.value}°`;
+        slider.setAttribute('aria-valuetext', `${slider.value} degrés`);
         this.updateRobot(true);
       });
+
+      // ── FIX #6 : sliders désactivés en E-STOP ──
+      if (this.validator.isEStopped) slider.disabled = true;
 
       this.sliders.push(slider);
       this.valBadges.push(badge);
@@ -965,6 +1121,7 @@ class RobotApp {
       if (this.sliders[i]) {
         const clamped = this.validator.clampAngle(a, i);
         this.sliders[i].value = clamped;
+        this.sliders[i].setAttribute('aria-valuetext', `${clamped.toFixed(0)} degrés`);
         if (this.valBadges[i]) this.valBadges[i].textContent = `${clamped.toFixed(0)}°`;
       }
     });
@@ -985,8 +1142,8 @@ class RobotApp {
   onIKTargetDragged(targetPos) {
     if (this.validator.isEStopped) return;
     const currentAngles = this.getCurrentAngles();
-    const solvedAngles = this.kinematics.solveIK(targetPos, currentAngles);
-    // ── SÉCURITÉ : valide la pose avant application ──
+    // ── FIX #4 : passe les limites à solveIK ──
+    const solvedAngles = this.kinematics.solveIK(targetPos, currentAngles, this.activeConfig.limits);
     const fk = this.kinematics.forwardKinematics(solvedAngles);
     if (fk.invalid) return;
     const v = this.validator.validateState(solvedAngles, fk.endEffectorPos, this.view.obstacles);
@@ -1031,14 +1188,15 @@ class RobotApp {
     const token = this._animationToken;
     this.view.resetObjectPositions();
 
+    const limits = this.activeConfig.limits;
     const cubePos = this.view.targetCube.position.clone();
     const dropPos = new THREE.Vector3(-25, 3, 20);
     const startAngles = this.getCurrentAngles();
 
-    const hoverCubeAngles = this.kinematics.solveIK(new THREE.Vector3(cubePos.x, cubePos.y + 10, cubePos.z), startAngles);
-    const graspAngles = this.kinematics.solveIK(cubePos, hoverCubeAngles);
-    const hoverDropAngles = this.kinematics.solveIK(new THREE.Vector3(dropPos.x, dropPos.y + 12, dropPos.z), graspAngles);
-    const releaseAngles = this.kinematics.solveIK(dropPos, hoverDropAngles);
+    const hoverCubeAngles = this.kinematics.solveIK(new THREE.Vector3(cubePos.x, cubePos.y + 10, cubePos.z), startAngles, limits);
+    const graspAngles = this.kinematics.solveIK(cubePos, hoverCubeAngles, limits);
+    const hoverDropAngles = this.kinematics.solveIK(new THREE.Vector3(dropPos.x, dropPos.y + 12, dropPos.z), graspAngles, limits);
+    const releaseAngles = this.kinematics.solveIK(dropPos, hoverDropAngles, limits);
 
     this.setGripperUI(100);
     this.animateToAngles(hoverCubeAngles, 800, () => {
@@ -1065,15 +1223,14 @@ class RobotApp {
   }
 
   animateGripper(targetVal, baseDuration, onComplete) {
-    const duration = baseDuration / this.speedFactor;
+    // ── FIX #17 : durée plancher ──
+    const duration = Math.max(16, baseDuration / this.speedFactor);
     const startVal = parseFloat(document.getElementById('gripper-slider')?.value || '100');
     const startTime = performance.now();
-    const start = performance.now();
 
     const step = (now) => {
       if (this.validator.isEStopped) return;
-      // ── SÉCURITÉ : timeout dur ──
-      if (now - start > SAFETY.ANIMATION_TIMEOUT_MS) {
+      if (now - startTime > SAFETY.ANIMATION_TIMEOUT_MS) {
         SafeLogger.warn('Animation gripper timeout');
         return;
       }
@@ -1105,8 +1262,9 @@ class RobotApp {
     executeWp();
   }
 
-  // ── SÉCURITÉ : vérifie vitesse + timeout + E-STOP ──
+  
   animateToAngles(targetAngles, baseDuration, onComplete) {
+    const myToken = this._animationToken;
     const startAngles = this.getCurrentAngles();
     const duration = Math.max(50, baseDuration / this.speedFactor);
 
@@ -1118,6 +1276,7 @@ class RobotApp {
     const startTime = performance.now();
 
     const animStep = (now) => {
+      if (myToken !== this._animationToken) return; // annulé
       if (this.validator.isEStopped) return;
       if (now - startTime > SAFETY.ANIMATION_TIMEOUT_MS) {
         SafeLogger.warn('Animation timeout');
@@ -1144,7 +1303,7 @@ class RobotApp {
 
   startLoop() {
     const loop = () => {
-      this.view.render();
+      if (!this._paused) this.view.render();
       requestAnimationFrame(loop);
     };
     requestAnimationFrame(loop);
