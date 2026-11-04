@@ -195,7 +195,6 @@ class DHLink {
 
 class KinematicChain {
   constructor(dhParams) {
-    // ── FIX #15 : pool de matrices réutilisables (perf) ──
     this._tmpMatrix = new THREE.Matrix4();
     this._tmpVec = new THREE.Vector3();
     this._tmpQuat = new THREE.Quaternion();
@@ -234,7 +233,6 @@ class KinematicChain {
     return { endEffectorPos: pos, transforms };
   }
 
-  // ── FIX #4 : IK bornée + clamp articulaire + validation NaN ──
   solveIK(targetPos, currentAnglesDeg, limits, maxIter = SAFETY.IK_MAX_ITER, damping = SAFETY.IK_DAMPING) {
     if (!targetPos || !Number.isFinite(targetPos.x)) {
       SafeLogger.warn('IK : cible invalide');
@@ -300,7 +298,6 @@ class Robot3DView {
     this._resizeObserver = null;
     this._rafId = null;
     this._paused = false;
-    // ── FIX #3 : flag anti-boucle TransformControls ──
     this._updatingGizmoProgrammatically = false;
     this.initScene();
   }
@@ -397,7 +394,6 @@ class Robot3DView {
       this.orbit.enabled = !event.value;
     });
 
-    // ── FIX #3 : ignore les updates programmatiques ──
     this.transformControls.addEventListener('change', () => {
       if (!this.transformControls.dragging) return;
       if (this._updatingGizmoProgrammatically) return;
@@ -407,7 +403,6 @@ class Robot3DView {
     this.robotGroup = new THREE.Group();
     this.scene.add(this.robotGroup);
 
-    // ── FIX #18 : ResizeObserver + fallback window ──
     this._resizeHandler = () => {
       if (!this.camera || !this.renderer) return;
       const w = this.container.clientWidth || window.innerWidth;
@@ -462,7 +457,6 @@ class Robot3DView {
     this.scene.add(this.targetCyl);
   }
 
-  // ── FIX #11 : validation URL stricte ──
   async loadGLTFModel(url, position = new THREE.Vector3(0, 0, 0), scale = new THREE.Vector3(1, 1, 1)) {
     if (typeof url !== 'string' || url.length === 0) {
       SafeLogger.warn('loadGLTFModel : URL invalide');
@@ -663,7 +657,6 @@ class Robot3DView {
       const pos = new THREE.Vector3();
       lastMat.decompose(pos, new THREE.Quaternion(), new THREE.Vector3());
       if (Number.isFinite(pos.x)) {
-        // ── FIX #3 : protège contre la boucle IK ↔ gizmo ──
         this._updatingGizmoProgrammatically = true;
         this.targetMesh.position.copy(pos);
         this._updatingGizmoProgrammatically = false;
@@ -717,7 +710,6 @@ class WaypointManager {
     return true;
   }
 
-  // ── FIX #9 : suppression individuelle ──
   removeWaypoint(id) {
     this.waypoints = this.waypoints.filter(w => w.id !== id);
     this.saveToLocalStorage();
@@ -732,7 +724,6 @@ class WaypointManager {
     if (this.onUpdate) this.onUpdate();
   }
 
-  // ── FIX #10 : persistance localStorage ──
   saveToLocalStorage() {
     try {
       localStorage.setItem(SAFETY.LOCALSTORAGE_KEY, JSON.stringify(this.waypoints));
@@ -777,7 +768,6 @@ class WaypointManager {
       </div>
     `).join('');
 
-    // ── FIX #9 : bind suppression ──
     this.container.querySelectorAll('.btn-wp-remove').forEach(btn => {
       btn.addEventListener('click', (e) => {
         const id = parseFloat(e.currentTarget.parentElement.dataset.id);
@@ -805,7 +795,6 @@ class WaypointManager {
     this.downloadFile(dataStr, 'robot_trajectory.gcode');
   }
 
-  // ── FIX #8 : export Python avec limites articulaires ──
   exportPython(jointLimits) {
     const limits = jointLimits || [];
     let py = '# Script Python de Trajectoire Robotique (ROS / PyBullet)\n';
@@ -876,7 +865,6 @@ class RobotApp {
   constructor() {
     this.speedFactor = 1.0;
     this._animationToken = 0;
-    // ── FIX #1 : initialisation défensive ──
     this.sliders = [];
     this.valBadges = [];
     this._paused = false;
@@ -940,7 +928,6 @@ class RobotApp {
     this.switchDOF('3');
     this.startLoop();
 
-    // ── FIX #19 : pause quand onglet caché ──
     document.addEventListener('visibilitychange', () => {
       this._paused = document.hidden;
     });
@@ -953,7 +940,6 @@ class RobotApp {
       this.switchDOF(e.target.value);
     });
 
-    // ── FIX #2 : E-STOP toggle (trigger ↔ reset) ──
     document.getElementById('btn-estop')?.addEventListener('click', () => {
       if (this.validator.isEStopped) {
         this.validator.resetEStop();
@@ -965,7 +951,6 @@ class RobotApp {
       this._updateEStopUI();
     });
 
-    // ── FIX #22 : ne pas voler Space/Escape aux inputs ──
     window.addEventListener('keydown', (e) => {
       const tag = document.activeElement?.tagName;
       const isFormControl = tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA';
@@ -1117,7 +1102,6 @@ class RobotApp {
 
       const slider = div.querySelector('input');
       const badge = div.querySelector('.val-badge');
-      // ── FIX #20 : aria-valuetext pour lecteurs d'écran ──
       slider.setAttribute('aria-valuetext', `0 degrés`);
       slider.setAttribute('aria-label', name);
 
@@ -1131,7 +1115,6 @@ class RobotApp {
         this.updateRobot(true);
       });
 
-      // ── FIX #6 : sliders désactivés en E-STOP ──
       if (this.validator.isEStopped) slider.disabled = true;
 
       this.sliders.push(slider);
@@ -1171,7 +1154,6 @@ class RobotApp {
   onIKTargetDragged(targetPos) {
     if (this.validator.isEStopped) return;
     const currentAngles = this.getCurrentAngles();
-    // ── FIX #4 : passe les limites à solveIK ──
     const solvedAngles = this.kinematics.solveIK(targetPos, currentAngles, this.activeConfig.limits);
     const fk = this.kinematics.forwardKinematics(solvedAngles);
     if (fk.invalid) return;
@@ -1252,7 +1234,6 @@ class RobotApp {
   }
 
   animateGripper(targetVal, baseDuration, onComplete) {
-    // ── FIX #17 : durée plancher ──
     const duration = Math.max(16, baseDuration / this.speedFactor);
     const startVal = parseFloat(document.getElementById('gripper-slider')?.value || '100');
     const startTime = performance.now();
@@ -1291,7 +1272,6 @@ class RobotApp {
     executeWp();
   }
 
-  
   animateToAngles(targetAngles, baseDuration, onComplete) {
     const myToken = this._animationToken;
     const startAngles = this.getCurrentAngles();
@@ -1305,7 +1285,7 @@ class RobotApp {
     const startTime = performance.now();
 
     const animStep = (now) => {
-      if (myToken !== this._animationToken) return; // annulé
+      if (myToken !== this._animationToken) return;
       if (this.validator.isEStopped) return;
       if (now - startTime > SAFETY.ANIMATION_TIMEOUT_MS) {
         SafeLogger.warn('Animation timeout');
@@ -1342,8 +1322,14 @@ class RobotApp {
 
 window.addEventListener('DOMContentLoaded', () => {
   try {
-    const test = document.createElement('canvas');
-    const gl = test.getContext('webgl2') || test.getContext('webgl');
+    const testCanvas = document.createElement('canvas');
+    const contextAttributes = { 
+      failIfMajorPerformanceCaveat: false, 
+      powerPreference: "high-performance" 
+    };
+    
+    const gl = testCanvas.getContext('webgl2', contextAttributes) || testCanvas.getContext('webgl', contextAttributes);
+    
     if (!gl) {
       document.getElementById('loader')?.classList.add('hidden');
       const err = document.getElementById('webgl-error');
@@ -1355,6 +1341,7 @@ window.addEventListener('DOMContentLoaded', () => {
     SafeLogger.info('Application initialisée');
   } catch (e) {
     SafeLogger.error('Échec initialisation', e);
-    document.getElementById('loader')?.classList.add('hidden');
+    const loader = document.getElementById('loader');
+    if (loader) loader.innerHTML = `<span style="color:red">Erreur JS : ${e.message}</span>`;
   }
 });
