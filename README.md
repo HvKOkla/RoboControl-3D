@@ -4,7 +4,16 @@
 
 **Web-based 6-DOF robotic arm simulator featuring Jacobian-based Inverse Kinematics, DH parameters, and trajectory generation.**
 
-🔗 **[Live Demo](https://hvkokla.github.io/RoboControl-3D/)**
+## Mathematical Validation (Python & C++)
+
+To prove the mathematical accuracy of the WebGL simulator, the Forward Kinematics (DH parameters) logic has been ported and validated in two additional languages:
+
+*   **Python (`python_examples/`)** : A script using `numpy` that replicates the exact joint transformations. Perfect for academic research and ROS prototyping.
+    *   Run it with: `python python_examples/ik_solver.py`
+*   **C++ (`cpp_examples/`)** : A high-performance version using raw matrix multiplication and CMake, demonstrating how the algorithm would run on an industrial robot controller.
+    *   Build it with: `cmake` and `make` (or standard `g++`).
+
+Both scripts output the exact same end-effector coordinates (X, Y, Z) as the web interface, ensuring mathematical consistency across all platforms.
 
 ## Tech Stack
 * **Rendering:** Three.js (WebGL), PBR Materials, Custom HDR Environment
