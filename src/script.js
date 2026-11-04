@@ -497,8 +497,10 @@ class Robot3DView {
           this.obstacles.push({ mesh: model, box });
         },
         undefined,
-        (err) => SafeLogger.error('Échec chargement GLTF', err);
-        document.getElementById('safety-alert-text').innerText = "Error loading 3D model";
+        (err) =>  { 
+          SafeLogger.error('Échec chargement GLTF', err);
+          document.getElementById('safety-alert-text').innerText = "Error loading 3D model";
+        }
       );
     } catch (e) {
       SafeLogger.error('GLTFLoader indisponible', e);
