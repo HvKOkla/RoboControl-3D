@@ -36,5 +36,8 @@ Sliders: Manual joint control
 🤝 Contributing
 Contributions are welcome! Check the open issues or look for good first issue labels.
 
-📄 License
-Apache License 2.0
+Please review our [Contributing Guidelines](CONTRIBUTING.md) and [Code of Conduct](CODE_OF_CONDUCT.md) before making your first contribution.
+
+## 📄 License
+MIT License.
+```
