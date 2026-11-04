@@ -47,6 +47,8 @@ cd RoboControl-3D
 We welcome contributions! Check out the [open issues](https://github.com/HvKOkla/RoboControl-3D/issues) to see what needs to be done. 
 Look for the `good first issue` label if you're new to the project.
 
+Please review our [Contributing Guidelines](CONTRIBUTING.md) and [Code of Conduct](CODE_OF_CONDUCT.md) before making your first contribution.
+
 ## 📄 License
 MIT License.
 ```
