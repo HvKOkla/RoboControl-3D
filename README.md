@@ -37,4 +37,4 @@ Sliders: Manual joint control
 Contributions are welcome! Check the open issues or look for good first issue labels.
 
 📄 License
-MIT License.
+Apache License 2.0
