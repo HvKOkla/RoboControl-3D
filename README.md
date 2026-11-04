@@ -10,9 +10,9 @@ To prove the mathematical accuracy of the WebGL simulator, the Forward Kinematic
 
 *   **Python (`python_examples/`)** : A script using `numpy` that replicates the exact joint transformations. Perfect for academic research and ROS prototyping.
 	### Python 3D Trajectory Visualization
-By running `python_examples/ik_solver.py`, the script calculates the Forward Kinematics and plots the trajectory using Matplotlib.
+By running `python_examples/ik_solver.py`, the script calculates the Forward Kinematics and plots the trajectory using Matplotlib.<img width="479" height="419" alt="trajectory_plot" src="https://github.com/user-attachments/assets/23eca3fc-c157-4b3d-a9ae-001d1134d815" />
 
-![Trajectory Plot](python_examples/trajectory_plot.png)
+
 
 *   **C++ (`cpp_examples/`)** : A high-performance version using raw matrix multiplication and CMake, demonstrating how the algorithm would run on an industrial robot controller.
     *   Build it with: `cmake` and `make` (or standard `g++`).
