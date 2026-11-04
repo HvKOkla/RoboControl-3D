@@ -12,7 +12,7 @@ This project was built to demonstrate advanced web-based 3D rendering, mathemati
 
 ## 🛠️ Technical Stack
 
-*   **Rendering:** Three.js (r128)
+*   **Rendering:** Three.js (r130)
 *   **Architecture:** Vanilla JavaScript (ES6 Classes)
 *   **Math:** Custom Matrix & Vector operations for kinematics.
 *   **UI/UX:** HTML5/CSS3 (Glassmorphism design, responsive HUD).
