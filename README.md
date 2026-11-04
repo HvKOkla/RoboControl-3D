@@ -72,5 +72,3 @@ We welcome contributions from the open-source community! Whether you want to fix
 ## 📄 License
 This project is licensed under the **MIT License**. You are free to use, modify, and distribute it.
 ```
-4. **Les prérequis Python** : On précise qu'il faut `pip install numpy matplotlib` pour que le script fonctionne.
-5. **"Contributing"** : On précise qu'on cherche des gens pour faire des maths avancées (IK analytique, RRT), ce qui va attirer les ingénieurs.
