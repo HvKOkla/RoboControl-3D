@@ -1325,7 +1325,7 @@ window.addEventListener('DOMContentLoaded', () => {
     const testCanvas = document.createElement('canvas');
     const contextAttributes = { 
       failIfMajorPerformanceCaveat: false, 
-      powerPreference: "high-performance" 
+      powerPreference: "default"
     };
     
     const gl = testCanvas.getContext('webgl2', contextAttributes) || testCanvas.getContext('webgl', contextAttributes);
