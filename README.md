@@ -43,6 +43,10 @@ cd RoboControl-3D
 * **Sliders:** Manual joint control.
 * **Space / Esc:** Trigger E-STOP (Press `R` to reset).
 
+## 🤝 Contributing
+We welcome contributions! Check out the [open issues](https://github.com/HvKOkla/RoboControl-3D/issues) to see what needs to be done. 
+Look for the `good first issue` label if you're new to the project.
+
 ## 📄 License
 MIT License.
 ```
